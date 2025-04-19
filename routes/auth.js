@@ -12,34 +12,82 @@ router.post(
   [
     check('name', 'Name is required').not().isEmpty(),
     check('email', 'Please include a valid email').isEmail(),
-    check('password', 'Please enter a password with 6 or more characters').isLength({ min: 6 })
+    check('password', 'Please enter a password with 6 or more characters').isLength({ min: 6 }),
+    check('confirmPassword', 'Passwords do not match').custom((value, { req }) => {
+      if (value !== req.body.password) {
+        throw new Error('Passwords do not match');
+      }
+      return true;
+    }),
+    check('age', 'Age must be between 18 and 100').isInt({ min: 18, max: 100 }),
+    check('gender', 'Gender is required').isIn(['male', 'female', 'other']),
+    check('phone', 'Please provide a valid phone number').matches(/^\+?[1-9]\d{1,14}$/),
+    check('address', 'Address is required').not().isEmpty()
   ],
   async (req, res) => {
     // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({ 
+        success: false,
+        errors: errors.array() 
+      });
     }
 
-    const { name, email, password, role } = req.body;
+    const { 
+      name, 
+      email, 
+      password, 
+      confirmPassword,
+      age,
+      gender,
+      phone,
+      address,
+      role, 
+      company, 
+      jobTitle, 
+      preferences 
+    } = req.body;
 
     try {
-      // Check if user already exists
-      let user = await User.findOne({ email });
-      if (user) {
+      // Check if user already exists (by email)
+      let userByEmail = await User.findOne({ email });
+      if (userByEmail) {
         return res.status(400).json({ 
           success: false,
-          error: 'User already exists' 
+          error: 'User with this email already exists' 
         });
       }
 
-      // Create user
-      user = await User.create({
+      // Check if user already exists (by phone)
+      let userByPhone = await User.findOne({ phone });
+      if (userByPhone) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'User with this phone number already exists' 
+        });
+      }
+
+      // Build user object
+      const userData = {
         name,
         email,
         password,
+        confirmPassword,
+        age,
+        gender,
+        phone,
+        address,
         role: role || 'user'  // Default to 'user' if role not specified
-      });
+      };
+
+      // Add optional fields
+      if (company) userData.company = company;
+      if (jobTitle) userData.jobTitle = jobTitle;
+      if (preferences) userData.preferences = preferences;
+
+      // Create user
+      const user = await User.create(userData);
 
       // Return JWT
       const token = user.getSignedJwtToken();
@@ -108,10 +156,16 @@ router.post(
           id: user._id,
           name: user.name,
           email: user.email,
+          age: user.age,
+          gender: user.gender,
+          phone: user.phone,
+          address: user.address,
           role: user.role,
           preferences: user.preferences,
           company: user.company,
-          jobTitle: user.jobTitle
+          jobTitle: user.jobTitle,
+          lastLogin: user.lastLogin,
+          profileImage: user.profileImage
         }
       });
     } catch (err) {

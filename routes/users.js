@@ -72,7 +72,13 @@ router.put('/:id', protect, authorize(['admin']), async (req, res) => {
     company, 
     jobTitle, 
     isActive, 
-    storageLimit 
+    storageLimit,
+    preferences,
+    address,
+    phone,
+    age,
+    gender,
+    profileImage
   } = req.body;
   
   // Build user object
@@ -84,6 +90,18 @@ router.put('/:id', protect, authorize(['admin']), async (req, res) => {
   if (jobTitle !== undefined) userFields.jobTitle = jobTitle;
   if (isActive !== undefined) userFields.isActive = isActive;
   if (storageLimit) userFields.storageLimit = storageLimit;
+  if (address) userFields.address = address;
+  if (phone) userFields.phone = phone;
+  if (age) userFields.age = age;
+  if (gender) userFields.gender = gender;
+  if (profileImage) userFields.profileImage = profileImage;
+  
+  if (preferences) {
+    userFields.preferences = {};
+    if (preferences.theme) userFields.preferences.theme = preferences.theme;
+    if (preferences.dashboardLayout) userFields.preferences.dashboardLayout = preferences.dashboardLayout;
+    if (preferences.emailNotifications !== undefined) userFields.preferences.emailNotifications = preferences.emailNotifications;
+  }
   
   try {
     let user = await User.findById(req.params.id);
@@ -93,6 +111,28 @@ router.put('/:id', protect, authorize(['admin']), async (req, res) => {
         success: false,
         error: 'User not found' 
       });
+    }
+    
+    // Validate email if changing
+    if (email && email !== user.email) {
+      const userWithEmailExists = await User.findOne({ email, _id: { $ne: req.params.id } });
+      if (userWithEmailExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email is already in use'
+        });
+      }
+    }
+    
+    // Validate phone if changing
+    if (phone && phone !== user.phone) {
+      const userWithPhoneExists = await User.findOne({ phone, _id: { $ne: req.params.id } });
+      if (userWithPhoneExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number is already in use'
+        });
+      }
     }
     
     // Update
@@ -172,17 +212,33 @@ router.get('/:id/activity', protect, authorize(['admin']), async (req, res) => {
   }
 });
 
-// @route   PUT api/users/profile
+// @route   PUT api/users/profile/update
 // @desc    Update current user profile
 // @access  Private
 router.put('/profile/update', protect, async (req, res) => {
-  const { name, company, jobTitle, preferences } = req.body;
+  const { 
+    name, 
+    company, 
+    jobTitle, 
+    preferences, 
+    address, 
+    phone, 
+    age, 
+    gender,
+    profileImage
+  } = req.body;
   
   // Build user object
   const userFields = {};
   if (name) userFields.name = name;
   if (company !== undefined) userFields.company = company;
   if (jobTitle !== undefined) userFields.jobTitle = jobTitle;
+  if (address) userFields.address = address;
+  if (phone) userFields.phone = phone;
+  if (age) userFields.age = age;
+  if (gender) userFields.gender = gender;
+  if (profileImage) userFields.profileImage = profileImage;
+  
   if (preferences) {
     userFields.preferences = {};
     if (preferences.theme) userFields.preferences.theme = preferences.theme;
@@ -198,6 +254,18 @@ router.put('/profile/update', protect, async (req, res) => {
         success: false,
         error: 'User not found' 
       });
+    }
+    
+    // Validate phone number if changing
+    if (phone && phone !== user.phone) {
+      // Check if phone number is already taken
+      const userWithPhoneExists = await User.findOne({ phone, _id: { $ne: req.user.id } });
+      if (userWithPhoneExists) {
+        return res.status(400).json({
+          success: false,
+          error: 'Phone number is already in use'
+        });
+      }
     }
     
     // Update

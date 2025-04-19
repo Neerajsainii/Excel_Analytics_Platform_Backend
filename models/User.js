@@ -23,11 +23,37 @@ const UserSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
-  role: {
+  confirmPassword: {
     type: String,
-    enum: ['user', 'admin'],
-    default: 'user'
+    required: [true, 'Please add a password'],
+    minlength: 6,
+    select: false
   },
+  age: {
+    type: Number,
+    required: [true, 'Please add an age'],
+    min: 18,
+    max: 100
+  },
+  gender: {
+    type: String,
+    required: [true, 'Please add a gender'],
+    enum: ['male', 'female', 'other']
+  },
+  phone: {
+    type: String,
+    required: [true, 'Please add a phone number'],
+    unique: true,
+    match: [
+      /^\+?[1-9]\d{1,14}$/, 
+      'Please add a valid phone number'
+    ]
+  },
+  address: {
+    type: String,
+    required: [true, 'Please add an address'],
+    trim: true
+  }, 
   company: {
     type: String,
     trim: true
