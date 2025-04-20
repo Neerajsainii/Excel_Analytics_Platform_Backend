@@ -77,14 +77,39 @@ router.post(
         age,
         gender,
         phone,
-        address,
-        role: role || 'user'  // Default to 'user' if role not specified
+        address
       };
 
-      // Add optional fields
+      // Add optional fields if provided
+      if (role && (role === 'user' || role === 'admin')) {
+        userData.role = role;
+      }
+      
       if (company) userData.company = company;
       if (jobTitle) userData.jobTitle = jobTitle;
-      if (preferences) userData.preferences = preferences;
+      
+      // Add preferences if provided
+      if (preferences) {
+        // Validate theme
+        if (preferences.theme && 
+            ['light', 'dark', 'system'].includes(preferences.theme)) {
+          if (!userData.preferences) userData.preferences = {};
+          userData.preferences.theme = preferences.theme;
+        }
+        
+        // Validate dashboardLayout
+        if (preferences.dashboardLayout && 
+            ['grid', 'list', 'compact'].includes(preferences.dashboardLayout)) {
+          if (!userData.preferences) userData.preferences = {};
+          userData.preferences.dashboardLayout = preferences.dashboardLayout;
+        }
+        
+        // Validate emailNotifications
+        if (typeof preferences.emailNotifications === 'boolean') {
+          if (!userData.preferences) userData.preferences = {};
+          userData.preferences.emailNotifications = preferences.emailNotifications;
+        }
+      }
 
       // Create user
       const user = await User.create(userData);
@@ -94,10 +119,35 @@ router.post(
 
       res.status(201).json({
         success: true,
-        token
+        token,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role
+        }
       });
     } catch (err) {
-      console.error(err.message);
+      console.error('Registration error:', err.message);
+      
+      // Handle MongoDB validation errors
+      if (err.name === 'ValidationError') {
+        const messages = Object.values(err.errors).map(val => val.message);
+        return res.status(400).json({
+          success: false,
+          errors: messages
+        });
+      }
+      
+      // Handle duplicate key errors (backup for unique fields)
+      if (err.code === 11000) {
+        const field = Object.keys(err.keyValue)[0];
+        return res.status(400).json({
+          success: false,
+          error: `User with this ${field} already exists`
+        });
+      }
+      
       res.status(500).json({ 
         success: false,
         error: 'Server error' 

@@ -29,6 +29,11 @@ const UserSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
+  role: {
+    type: String,
+    enum: ['user', 'admin'],
+    default: 'user'
+  },
   age: {
     type: Number,
     required: [true, 'Please add an age'],
@@ -111,6 +116,11 @@ UserSchema.pre('save', async function(next) {
   
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
+  
+  // Remove confirmPassword field before saving
+  this.confirmPassword = undefined;
+  
+  next();
 });
 
 // Sign JWT and return

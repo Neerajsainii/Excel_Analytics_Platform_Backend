@@ -38,7 +38,34 @@
 ```json
 {
   "success": true,
-  "token": "JWT_TOKEN_HERE"
+  "token": "JWT_TOKEN_HERE",
+  "user": {
+    "id": "user_id",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "role": "user"
+  }
+}
+```
+
+**Response Error (400):**
+```json
+{
+  "success": false,
+  "errors": [
+    {
+      "msg": "Error message here",
+      "param": "field_name",
+      "location": "body"
+    }
+  ]
+}
+```
+or
+```json
+{
+  "success": false,
+  "error": "User with this email already exists"
 }
 ```
 

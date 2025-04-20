@@ -37,7 +37,7 @@ coverage/
 # Project-specific
 uploads/
 temp/
-
+testUserModel.js
 # IDE and editor directories
 .idea/
 .vscode/
