@@ -139,8 +139,23 @@ UserSchema.methods.matchPassword = async function(enteredPassword) {
 
 // Update last login
 UserSchema.methods.updateLastLogin = async function() {
-  this.lastLogin = Date.now();
-  return this.save();
+  try {
+    // Only update the lastLogin field to avoid password-related validation issues
+    await mongoose.model('User').findByIdAndUpdate(
+      this._id,
+      { $set: { lastLogin: Date.now() } },
+      { new: true }
+    );
+    
+    // Update the instance property too
+    this.lastLogin = Date.now();
+    
+    return true;
+  } catch (err) {
+    console.error('Error updating last login:', err.message);
+    // Don't throw the error to prevent login failures
+    return false;
+  }
 };
 
 module.exports = mongoose.model('User', UserSchema); 

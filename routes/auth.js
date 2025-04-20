@@ -169,7 +169,10 @@ router.post(
     // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
     }
 
     const { email, password } = req.body;
@@ -184,6 +187,14 @@ router.post(
         });
       }
 
+      // Check if user is active
+      if (!user.isActive) {
+        return res.status(401).json({
+          success: false,
+          error: 'Your account has been deactivated. Please contact admin.'
+        });
+      }
+
       // Check if password matches
       const isMatch = await user.matchPassword(password);
       if (!isMatch) {
@@ -193,13 +204,19 @@ router.post(
         });
       }
 
-      // Update last login time
-      await user.updateLastLogin();
-
-      // Return JWT
+      // Generate JWT token
       const token = user.getSignedJwtToken();
 
-      res.json({
+      // Update last login time - wrap in try/catch to prevent this from breaking login
+      try {
+        await user.updateLastLogin();
+      } catch (updateErr) {
+        console.error('Error updating last login time:', updateErr.message);
+        // Continue with login even if updating last login fails
+      }
+
+      // Return successful response
+      res.status(200).json({
         success: true,
         token,
         user: {
@@ -219,7 +236,7 @@ router.post(
         }
       });
     } catch (err) {
-      console.error(err.message);
+      console.error('Login error:', err.message);
       res.status(500).json({ 
         success: false,
         error: 'Server error' 

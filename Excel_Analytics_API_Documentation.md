@@ -80,6 +80,7 @@ or
 - "Please include a valid email"
 - "Password is required"
 - "Invalid credentials"
+- "Your account has been deactivated. Please contact admin."
 
 **Response Success (200):**
 ```json
@@ -108,8 +109,39 @@ or
 }
 ```
 
+**Response Error (400) - Validation Error:**
+```json
+{
+  "success": false,
+  "errors": [
+    {
+      "msg": "Please include a valid email",
+      "param": "email",
+      "location": "body"
+    }
+  ]
+}
+```
+
+**Response Error (401) - Invalid Credentials:**
+```json
+{
+  "success": false,
+  "error": "Invalid credentials"
+}
+```
+
+**Response Error (401) - Inactive Account:**
+```json
+{
+  "success": false,
+  "error": "Your account has been deactivated. Please contact admin."
+}
+```
+
 **Notes:**
 - Login now updates the `lastLogin` timestamp automatically via `updateLastLogin()` method
+- The login process is designed to continue even if updating the last login time fails
 
 ### Get Current User
 **Endpoint:** `GET /api/auth/me`
