@@ -38,6 +38,8 @@ coverage/
 uploads/
 temp/
 testUserModel.js
+testLoginFix.js
+testLoginAPI.js
 # IDE and editor directories
 .idea/
 .vscode/
