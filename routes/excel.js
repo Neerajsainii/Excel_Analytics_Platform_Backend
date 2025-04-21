@@ -6,6 +6,7 @@ const fs = require('fs');
 const XLSX = require('xlsx');
 const ExcelFile = require('../models/ExcelFile');
 const { protect, authorize } = require('../middleware/auth');
+const User = require('../models/User');
 
 // Set up multer storage
 const storage = multer.diskStorage({
@@ -100,6 +101,8 @@ router.get('/:id', protect, async (req, res) => {
 // @access  Private
 router.delete('/:id', protect, async (req, res) => {
   try {
+    const ExcelData = require('../models/ExcelData');
+    
     const file = await ExcelFile.findById(req.params.id);
     
     if (!file) {
@@ -123,17 +126,27 @@ router.delete('/:id', protect, async (req, res) => {
       fs.unlinkSync(filePath);
     }
     
-    await ExcelFile.findByIdAndRemove(req.params.id);
+    // Delete associated data
+    await ExcelData.deleteMany({ file: file._id });
+    
+    // Update user's storage used
+    await User.findByIdAndUpdate(
+      file.user,
+      { $inc: { storageUsed: -file.fileSize } }
+    );
+    
+    // Delete the file record
+    await ExcelFile.findByIdAndDelete(req.params.id);
     
     res.json({
       success: true,
       data: {}
     });
   } catch (err) {
-    console.error(err.message);
+    console.error('Excel file deletion error:', err.message);
     res.status(500).json({
       success: false,
-      error: 'Server error'
+      error: 'Server error: ' + err.message
     });
   }
 });
@@ -185,12 +198,185 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
 
     await excelFile.save();
 
+    // Update user's storage used
+    await User.findByIdAndUpdate(
+      req.user.id,
+      { $inc: { storageUsed: req.file.size } }
+    );
+
     res.status(201).json({
       success: true,
       data: excelFile
     });
   } catch (err) {
-    console.error(err.message);
+    console.error('Excel upload error:', err.message);
+    
+    // If there was an error, try to delete the uploaded file
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkErr) {
+        console.error('Failed to delete uploaded file:', unlinkErr.message);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   POST api/excel/:id/parse
+// @desc    Parse Excel file and store structured data
+// @access  Private
+router.post('/:id/parse', protect, async (req, res) => {
+  try {
+    const excelProcessor = require('../services/excelProcessor');
+    const ExcelData = require('../models/ExcelData');
+    
+    // Get the file
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Path to the file
+    const filePath = path.join('uploads', file.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found on disk'
+      });
+    }
+    
+    // Determine sheet to process
+    const sheetName = req.body.sheetName || file.sheets[0].name;
+    
+    // Check if this sheet has already been processed
+    const existingData = await ExcelData.findOne({
+      file: file._id,
+      sheetName: sheetName
+    });
+    
+    if (existingData) {
+      return res.json({
+        success: true,
+        message: 'Sheet already processed',
+        data: existingData
+      });
+    }
+    
+    // Process the file
+    const processedData = excelProcessor.processExcelFile(filePath, sheetName);
+    
+    // Create a new ExcelData document
+    const excelData = new ExcelData({
+      file: file._id,
+      user: req.user.id,
+      sheetName: processedData.sheetName,
+      columns: processedData.columns,
+      data: processedData.data,
+      rowCount: processedData.rowCount,
+      summary: processedData.summary
+    });
+    
+    // Save the processed data
+    await excelData.save();
+    
+    res.json({
+      success: true,
+      data: excelData
+    });
+  } catch (err) {
+    console.error('Excel parsing error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/data
+// @desc    Get parsed data for an Excel file
+// @access  Private
+router.get('/:id/data', protect, async (req, res) => {
+  try {
+    const ExcelData = require('../models/ExcelData');
+    
+    // Get the file
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Get sheet name from query params or use the first sheet
+    const sheetName = req.query.sheet || file.sheets[0].name;
+    
+    // Find the processed data
+    const excelData = await ExcelData.findOne({
+      file: file._id,
+      sheetName: sheetName
+    });
+    
+    if (!excelData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Processed data not found for this sheet. Please parse the file first.'
+      });
+    }
+    
+    // Pagination
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    
+    // Calculate total pages
+    const totalPages = Math.ceil(excelData.rowCount / limit);
+    
+    // Get subset of data
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const paginatedData = excelData.data.slice(startIndex, endIndex);
+    
+    res.json({
+      success: true,
+      sheetName: excelData.sheetName,
+      columns: excelData.columns,
+      summary: excelData.summary,
+      pagination: {
+        page,
+        limit,
+        totalRows: excelData.rowCount,
+        totalPages
+      },
+      data: paginatedData
+    });
+  } catch (err) {
+    console.error('Excel data retrieval error:', err.message);
     res.status(500).json({
       success: false,
       error: 'Server error: ' + err.message

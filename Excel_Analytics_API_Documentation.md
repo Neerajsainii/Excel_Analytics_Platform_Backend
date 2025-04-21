@@ -752,7 +752,7 @@ or
 ```
 
 **Notes:**
-- Now files are sorted by uploadDate (newest first)
+- Files are sorted by uploadDate (newest first)
 
 ### Get Excel File by ID
 **Endpoint:** `GET /api/excel/:id`
@@ -836,7 +836,187 @@ or
 ```
 
 **Notes:**
-- This endpoint now updates user's storageUsed field
+- This endpoint updates user's storageUsed field
+
+### Parse Excel File
+**Endpoint:** `POST /api/excel/:id/parse`
+
+**Authentication:** Required (JWT Token)
+
+**Request Body:**
+```json
+{
+  "sheetName": "Sales" // Optional, defaults to first sheet
+}
+```
+
+**Validations:**
+- "File not found"
+- "Not authorized to access this file" (if not owner or admin)
+- "File not found on disk"
+
+**Response Success (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "_id": "parsed_data_id",
+    "file": "file_id",
+    "user": "user_id",
+    "sheetName": "Sales",
+    "columns": [
+      {
+        "name": "date",
+        "originalName": "Date",
+        "dataType": "date",
+        "statistics": {
+          "count": 100,
+          "nullCount": 0,
+          "uniqueCount": 30,
+          "min": "2023-01-01T00:00:00.000Z",
+          "max": "2023-01-30T00:00:00.000Z"
+        }
+      },
+      {
+        "name": "product",
+        "originalName": "Product",
+        "dataType": "string",
+        "statistics": {
+          "count": 100,
+          "nullCount": 0,
+          "uniqueCount": 5,
+          "minLength": 7,
+          "maxLength": 9,
+          "mostCommon": "Widget A"
+        }
+      },
+      {
+        "name": "amount",
+        "originalName": "Amount",
+        "dataType": "number",
+        "statistics": {
+          "count": 100,
+          "nullCount": 0,
+          "uniqueCount": 20,
+          "min": 100,
+          "max": 1000,
+          "sum": 50000,
+          "mean": 500,
+          "variance": 40000,
+          "stdDev": 200
+        }
+      },
+      {
+        "name": "region",
+        "originalName": "Region",
+        "dataType": "string",
+        "statistics": {
+          "count": 100,
+          "nullCount": 0,
+          "uniqueCount": 4,
+          "minLength": 5,
+          "maxLength": 5,
+          "mostCommon": "North"
+        }
+      }
+    ],
+    "rowCount": 100,
+    "processedAt": "2023-01-02T00:00:00.000Z",
+    "summary": {
+      "rowCount": 100,
+      "columnCount": 4,
+      "emptyRows": 0,
+      "dataTypes": {
+        "date": 1,
+        "string": 2,
+        "number": 1
+      }
+    }
+  }
+}
+```
+
+### Get Parsed Excel Data
+**Endpoint:** `GET /api/excel/:id/data`
+
+**Authentication:** Required (JWT Token)
+
+**Query Parameters:**
+- `sheet` (String, optional) - Sheet name, defaults to first sheet
+- `page` (Number, optional) - Page number for pagination, defaults to 1
+- `limit` (Number, optional) - Records per page, defaults to 100
+
+**Validations:**
+- "File not found"
+- "Not authorized to access this file" (if not owner or admin)
+- "Processed data not found for this sheet. Please parse the file first."
+
+**Response Success (200):**
+```json
+{
+  "success": true,
+  "sheetName": "Sales",
+  "columns": [
+    {
+      "name": "date",
+      "originalName": "Date",
+      "dataType": "date",
+      "statistics": {
+        "count": 100,
+        "nullCount": 0,
+        "uniqueCount": 30,
+        "min": "2023-01-01T00:00:00.000Z",
+        "max": "2023-01-30T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "product",
+      "originalName": "Product",
+      "dataType": "string",
+      "statistics": {
+        "count": 100,
+        "nullCount": 0,
+        "uniqueCount": 5,
+        "minLength": 7,
+        "maxLength": 9,
+        "mostCommon": "Widget A"
+      }
+    },
+    // Additional columns...
+  ],
+  "summary": {
+    "rowCount": 100,
+    "columnCount": 4,
+    "emptyRows": 0,
+    "dataTypes": {
+      "date": 1,
+      "string": 2,
+      "number": 1
+    }
+  },
+  "pagination": {
+    "page": 1,
+    "limit": 100,
+    "totalRows": 100,
+    "totalPages": 1
+  },
+  "data": [
+    {
+      "date": "2023-01-01",
+      "product": "Widget A",
+      "amount": 500,
+      "region": "North"
+    },
+    {
+      "date": "2023-01-01",
+      "product": "Widget B",
+      "amount": 300,
+      "region": "South"
+    }
+    // Additional data rows...
+  ]
+}
+```
 
 ### Delete Excel File
 **Endpoint:** `DELETE /api/excel/:id`
@@ -858,6 +1038,7 @@ or
 **Notes:**
 - Now uses `findByIdAndDelete()` instead of deprecated methods
 - Updates user's storageUsed field when file is deleted
+- Deletes associated parsed data
 
 ### Analyze Excel File
 **Endpoint:** `GET /api/excel/:id/analyze`
@@ -914,45 +1095,3 @@ or
   ]
 }
 ```
-
-## Authentication Mechanism
-
-The Excel Analytics Platform uses JSON Web Tokens (JWT) for authentication:
-
-1. **Token Format:** `Authorization: Bearer <jwt_token>`
-2. **Token Validity:** 24 hours (configurable)
-3. **Token Payload:**
-   - User ID
-   - User Role (for authorization)
-   - Expiration Time
-
-### Authorization Middleware
-
-Protected routes use middleware that:
-1. Extracts the token from the Authorization header
-2. Verifies the token signature and expiration
-3. Loads the user from the database
-4. Checks user role for admin-protected routes
-
-**Updates to middleware:**
-- Now properly handles the updated user model
-- Includes role information in token for more efficient role-based access control
-- Updates last login timestamp on authentication
-
-### Authorization Error Messages
-
-- "Not authorized to access this route" - Invalid or missing token
-- "User role {role} is not authorized to access this route" - Insufficient privileges
-
-## Error Response Format
-
-All API errors follow this format:
-```json
-{
-  "success": false,
-  "error": "Error message here"
-}
-```
-
----
-*This document outlines the available APIs, required fields, and validation messages for the Excel Analytics Platform. For implementation details, refer to the codebase.* 
