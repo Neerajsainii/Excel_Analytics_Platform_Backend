@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: excel-analytics-platform
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PORT
+        value: 5000
+    disk:
+      name: uploads
+      mountPath: /uploads
+      sizeGB: 1 
