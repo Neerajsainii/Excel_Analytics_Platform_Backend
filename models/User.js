@@ -29,6 +29,22 @@ const UserSchema = new mongoose.Schema({
     minlength: 6,
     select: false
   },
+  resetPasswordToken: {
+    type: String,
+    select: false
+  },
+  resetPasswordExpire: {
+    type: Date,
+    select: false
+  },
+  resetPasswordOTP: {
+    type: String,
+    select: false
+  },
+  resetPasswordOTPExpire: {
+    type: Date,
+    select: false
+  },
   role: {
     type: String,
     enum: ['user', 'admin'],
@@ -158,4 +174,66 @@ UserSchema.methods.updateLastLogin = async function() {
   }
 };
 
-module.exports = mongoose.model('User', UserSchema); 
+// Generate and hash password token (Legacy - keeping for backward compatibility)
+UserSchema.methods.getResetPasswordToken = function() {
+  // Generate token
+  const resetToken = require('crypto').randomBytes(20).toString('hex');
+
+  // Hash token and set to resetPasswordToken field
+  this.resetPasswordToken = require('crypto')
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+
+  // Set expire
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+  return resetToken;
+};
+
+// Generate OTP for password reset
+UserSchema.methods.generateResetPasswordOTP = function() {
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  // Hash OTP and set to resetPasswordOTP field
+  this.resetPasswordOTP = require('crypto')
+    .createHash('sha256')
+    .update(otp)
+    .digest('hex');
+  
+  // Set expire to 2 minutes
+  this.resetPasswordOTPExpire = Date.now() + 2 * 60 * 1000; // 2 minutes
+  
+  return otp;
+};
+
+// Verify OTP
+UserSchema.methods.verifyResetPasswordOTP = function(enteredOTP) {
+  // Convert OTP to string to handle both number and string inputs
+  const otpString = String(enteredOTP);
+  
+  // Hash the entered OTP
+  const hashedOTP = require('crypto')
+    .createHash('sha256')
+    .update(otpString)
+    .digest('hex');
+  
+  // Check if OTP matches and is not expired
+  return this.resetPasswordOTP === hashedOTP && 
+         this.resetPasswordOTPExpire > Date.now();
+};
+
+// Clear reset token and expire
+UserSchema.methods.clearResetPasswordToken = function() {
+  this.resetPasswordToken = undefined;
+  this.resetPasswordExpire = undefined;
+};
+
+// Clear OTP and expire
+UserSchema.methods.clearResetPasswordOTP = function() {
+  this.resetPasswordOTP = undefined;
+  this.resetPasswordOTPExpire = undefined;
+};
+
+module.exports = mongoose.model('User', UserSchema);

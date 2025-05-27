@@ -29,6 +29,7 @@ A powerful platform for analyzing Excel data with robust user/admin authenticati
   - JWT-based authentication
   - Password hashing with bcrypt
   - Role-based access control (User/Admin)
+  - Forget password with email reset
 
 - **Admin Dashboard**
   - User management console
@@ -94,6 +95,16 @@ The platform follows a modular architecture with clear separation of concerns:
    MONGO_URI=mongodb://localhost:27017/excel-analytics-platform
    JWT_SECRET=your_random_secret_key
    JWT_EXPIRE=24h
+   
+   # SMTP Email Configuration (Required for Forget Password)
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_EMAIL=your-email@gmail.com
+   SMTP_PASSWORD=your-gmail-app-password
+   
+   # Email Sender Information
+   FROM_NAME=Excel Analytics Platform
+   FROM_EMAIL=your-email@gmail.com
    ```
 
 4. Start the development server
@@ -112,6 +123,10 @@ The platform follows a modular architecture with clear separation of concerns:
 | POST | `/api/auth/register` | Register a new user | Public |
 | POST | `/api/auth/login` | Login and get token | Public |
 | GET | `/api/auth/me` | Get current user profile | Private |
+| POST | `/api/auth/forgot-password` | Send OTP for password reset | Public |
+| POST | `/api/auth/verify-otp` | Verify OTP and get reset token | Public |
+| POST | `/api/auth/reset-password-with-otp` | Reset password with OTP | Public |
+| PUT | `/api/auth/reset-password/:token` | Reset password with token (legacy) | Public |
 
 ### User Management Endpoints
 

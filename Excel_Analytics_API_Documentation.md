@@ -3,7 +3,7 @@
 ## Authentication APIs
 
 ### Register User
-**Endpoint:** `POST /api/auth/register`
+**Endpoint:** ` POST /api/auth/register`
 
 **Fields:**
 - `name` (String, required) - User's full name
