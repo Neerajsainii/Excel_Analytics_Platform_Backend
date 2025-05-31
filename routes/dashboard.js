@@ -331,4 +331,236 @@ router.delete('/:id', protect, async (req, res) => {
   }
 });
 
+// @route   POST api/dashboard/:id/charts
+// @desc    Add a chart to dashboard
+// @access  Private
+router.post('/:id/charts', protect, async (req, res) => {
+  try {
+    const dashboard = await Dashboard.findById(req.params.id);
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Dashboard not found'
+      });
+    }
+
+    // Check if user owns the dashboard
+    if (dashboard.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to modify this dashboard'
+      });
+    }
+
+    const { title, chartType, data, configuration, fileId, sheetName, xAxis, yAxis, groupBy } = req.body;
+
+    // Validate required fields
+    if (!title || !chartType) {
+      return res.status(400).json({
+        success: false,
+        error: 'Title and chartType are required'
+      });
+    }
+
+    // Create new chart object
+    const newChart = {
+      title,
+      chartType,
+      data: data || {},
+      configuration: {
+        ...configuration,
+        fileId,
+        sheetName,
+        xAxis,
+        yAxis,
+        groupBy
+      }
+    };
+
+    // Add chart to dashboard
+    dashboard.charts.push(newChart);
+    dashboard.lastUpdated = Date.now();
+
+    await dashboard.save();
+
+    // Return the newly created chart with its ID
+    const addedChart = dashboard.charts[dashboard.charts.length - 1];
+
+    res.status(201).json({
+      success: true,
+      data: addedChart
+    });
+  } catch (err) {
+    console.error('Add chart error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   PUT api/dashboard/:id/charts/:chartId
+// @desc    Update a specific chart in dashboard
+// @access  Private
+router.put('/:id/charts/:chartId', protect, async (req, res) => {
+  try {
+    const dashboard = await Dashboard.findById(req.params.id);
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Dashboard not found'
+      });
+    }
+
+    // Check if user owns the dashboard
+    if (dashboard.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to modify this dashboard'
+      });
+    }
+
+    // Find the chart to update
+    const chartIndex = dashboard.charts.findIndex(chart => chart._id.toString() === req.params.chartId);
+
+    if (chartIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        error: 'Chart not found'
+      });
+    }
+
+    const { title, chartType, data, configuration, fileId, sheetName, xAxis, yAxis, groupBy } = req.body;
+
+    // Update chart fields
+    if (title) dashboard.charts[chartIndex].title = title;
+    if (chartType) dashboard.charts[chartIndex].chartType = chartType;
+    if (data) dashboard.charts[chartIndex].data = data;
+    
+    // Update configuration
+    if (configuration || fileId || sheetName || xAxis || yAxis || groupBy) {
+      dashboard.charts[chartIndex].configuration = {
+        ...dashboard.charts[chartIndex].configuration,
+        ...configuration,
+        ...(fileId && { fileId }),
+        ...(sheetName && { sheetName }),
+        ...(xAxis && { xAxis }),
+        ...(yAxis && { yAxis }),
+        ...(groupBy && { groupBy })
+      };
+    }
+
+    dashboard.lastUpdated = Date.now();
+    await dashboard.save();
+
+    res.json({
+      success: true,
+      data: dashboard.charts[chartIndex]
+    });
+  } catch (err) {
+    console.error('Update chart error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   DELETE api/dashboard/:id/charts/:chartId
+// @desc    Delete a specific chart from dashboard
+// @access  Private
+router.delete('/:id/charts/:chartId', protect, async (req, res) => {
+  try {
+    const dashboard = await Dashboard.findById(req.params.id);
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Dashboard not found'
+      });
+    }
+
+    // Check if user owns the dashboard
+    if (dashboard.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to modify this dashboard'
+      });
+    }
+
+    // Find and remove the chart
+    const chartIndex = dashboard.charts.findIndex(chart => chart._id.toString() === req.params.chartId);
+
+    if (chartIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        error: 'Chart not found'
+      });
+    }
+
+    dashboard.charts.splice(chartIndex, 1);
+    dashboard.lastUpdated = Date.now();
+
+    await dashboard.save();
+
+    res.json({
+      success: true,
+      data: {}
+    });
+  } catch (err) {
+    console.error('Delete chart error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/dashboard/:id/charts/:chartId
+// @desc    Get a specific chart from dashboard
+// @access  Private or Public (if dashboard is public)
+router.get('/:id/charts/:chartId', async (req, res) => {
+  try {
+    const dashboard = await Dashboard.findById(req.params.id);
+
+    if (!dashboard) {
+      return res.status(404).json({
+        success: false,
+        error: 'Dashboard not found'
+      });
+    }
+
+    // Check if dashboard is public or if user owns dashboard
+    if (!dashboard.isPublic && (!req.user || dashboard.user.toString() !== req.user.id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this dashboard'
+      });
+    }
+
+    // Find the specific chart
+    const chart = dashboard.charts.find(chart => chart._id.toString() === req.params.chartId);
+
+    if (!chart) {
+      return res.status(404).json({
+        success: false,
+        error: 'Chart not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: chart
+    });
+  } catch (err) {
+    console.error('Get chart error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
 module.exports = router; 

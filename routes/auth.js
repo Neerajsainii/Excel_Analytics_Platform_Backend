@@ -291,9 +291,15 @@ router.post(
         });
       }
 
-      // Generate OTP
-      const otp = user.generateResetPasswordOTP();
+      // Get reset token
+      const resetToken = user.getResetPasswordToken();
+
       await user.save();
+
+      // Create reset url
+      const resetUrl = `${req.protocol}://${req.get(
+        'host'
+      )}/api/auth/reset-password/${resetToken}`;
 
       // Create email transporter
       const transporter = nodemailer.createTransport({
@@ -305,245 +311,33 @@ router.post(
         }
       });
 
-      // Create professional email message
+      // Create email message
       const message = {
         from: `${process.env.FROM_NAME} <${process.env.FROM_EMAIL}>`,
         to: user.email,
-        subject: 'Password Reset OTP - Excel Analytics Platform',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
-            <div style="background-color: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-              <h2 style="color: #333; text-align: center; margin-bottom: 30px;">Password Reset Request</h2>
-              
-              <p style="color: #666; font-size: 16px; line-height: 1.5;">Hello ${user.name},</p>
-              
-              <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                You have requested to reset your password for Excel Analytics Platform. 
-                Please use the following OTP to proceed with password reset:
-              </p>
-              
-              <div style="text-align: center; margin: 30px 0;">
-                <div style="background-color: #007bff; color: white; font-size: 32px; font-weight: bold; padding: 20px; border-radius: 8px; letter-spacing: 5px; display: inline-block;">
-                  ${otp}
-                </div>
-              </div>
-              
-              <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;">
-                <p style="color: #856404; margin: 0; font-size: 14px;">
-                  <strong>⚠️ Important:</strong> This OTP will expire in <strong>2 minutes</strong>. 
-                  If you didn't request this password reset, please ignore this email.
-                </p>
-              </div>
-              
-              <p style="color: #666; font-size: 14px; line-height: 1.5; margin-top: 30px;">
-                If you're having trouble, please contact our support team.
-              </p>
-              
-              <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-              
-              <p style="color: #999; font-size: 12px; text-align: center;">
-                This email was sent from Excel Analytics Platform. Please do not reply to this email.
-              </p>
-            </div>
-          </div>
-        `,
-        text: `
-          Password Reset OTP - Excel Analytics Platform
-          
-          Hello ${user.name},
-          
-          You have requested to reset your password. Please use the following OTP:
-          
-          OTP: ${otp}
-          
-          This OTP will expire in 2 minutes.
-          
-          If you didn't request this, please ignore this email.
-        `
+        subject: 'Password Reset Request',
+        text: `You are receiving this email because you (or someone else) has requested the reset of a password. Please make a PUT request to: \n\n ${resetUrl}`
       };
 
       await transporter.sendMail(message);
 
       res.json({
         success: true,
-        message: 'OTP sent to your email address',
-        data: {
-          email: user.email,
-          expiresIn: '2 minutes'
-        }
+        data: 'Email sent'
       });
     } catch (err) {
       console.error('Password reset error:', err);
 
-      // If there's an error, clear the OTP fields
+      // If there's an error, clear the reset token fields
       if (user) {
-        user.clearResetPasswordOTP();
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
         await user.save();
       }
 
       return res.status(500).json({
         success: false,
         error: 'Email could not be sent'
-      });
-    }
-  }
-);
-
-// @route   POST api/auth/verify-otp
-// @desc    Verify OTP for password reset
-// @access  Public
-router.post(
-  '/verify-otp',
-  [
-    check('email', 'Please include a valid email').isEmail(),
-    check('otp', 'Please provide a valid 6-digit OTP').custom((value) => {
-      // Convert to string for validation
-      const otpStr = String(value);
-      if (!/^\d{6}$/.test(otpStr)) {
-        throw new Error('OTP must be exactly 6 digits');
-      }
-      return true;
-    })
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: errors.array().map(err => err.msg).join(', '),
-        errors: errors.array()
-      });
-    }
-
-    try {
-      const { email, otp } = req.body;
-      
-      // Need to explicitly select OTP fields since they have select: false
-      const user = await User.findOne({ email }).select('+resetPasswordOTP +resetPasswordOTPExpire');
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'No user found with that email'
-        });
-      }
-
-      // Verify OTP
-      const isValidOTP = user.verifyResetPasswordOTP(otp);
-
-      if (!isValidOTP) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or expired OTP'
-        });
-      }
-
-      // Generate a temporary reset token for password reset
-      const resetToken = user.getResetPasswordToken();
-      await user.save();
-
-      res.json({
-        success: true,
-        message: 'OTP verified successfully',
-        data: {
-          resetToken,
-          expiresIn: '10 minutes'
-        }
-      });
-    } catch (err) {
-      console.error('OTP verification error:', err);
-      res.status(500).json({
-        success: false,
-        message: 'Server error'
-      });
-    }
-  }
-);
-
-// @route   POST api/auth/reset-password-with-otp
-// @desc    Reset password directly with OTP (alternative flow)
-// @access  Public
-router.post(
-  '/reset-password-with-otp',
-  [
-    check('email', 'Please include a valid email').isEmail(),
-    check('otp', 'Please provide a valid 6-digit OTP').custom((value) => {
-      // Convert to string for validation
-      const otpStr = String(value);
-      if (!/^\d{6}$/.test(otpStr)) {
-        throw new Error('OTP must be exactly 6 digits');
-      }
-      return true;
-    }),
-    check('password', 'Please enter a password with 6 or more characters').isLength({ min: 6 }),
-    check('confirmPassword', 'Passwords do not match').custom((value, { req }) => {
-      if (value !== req.body.password) {
-        throw new Error('Passwords do not match');
-      }
-      return true;
-    })
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: errors.array().map(err => err.msg).join(', '),
-        errors: errors.array()
-      });
-    }
-
-    try {
-      const { email, otp, password, confirmPassword } = req.body;
-      
-      // Need to explicitly select OTP fields since they have select: false
-      const user = await User.findOne({ email }).select('+resetPasswordOTP +resetPasswordOTPExpire');
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'No user found with that email'
-        });
-      }
-
-      // Verify OTP
-      const isValidOTP = user.verifyResetPasswordOTP(otp);
-
-      if (!isValidOTP) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or expired OTP'
-        });
-      }
-
-      // Set new password
-      user.password = password;
-      user.confirmPassword = confirmPassword;
-      
-      // Clear OTP fields
-      user.clearResetPasswordOTP();
-      
-      await user.save();
-
-      // Return token for auto login
-      const token = user.getSignedJwtToken();
-
-      res.json({
-        success: true,
-        message: 'Password reset successful',
-        token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role
-        }
-      });
-    } catch (err) {
-      console.error('Password reset error:', err);
-      res.status(500).json({
-        success: false,
-        message: 'Could not reset password'
       });
     }
   }

@@ -175,8 +175,9 @@ router.post('/upload', protect, upload.single('file'), async (req, res) => {
       // Extract columns from first row
       const columns = jsonData[0] || [];
       
-      // Extract a preview (first 5 rows)
-      const previewData = jsonData.slice(0, Math.min(6, jsonData.length));
+      // Extract a larger preview to support pagination (up to 100 rows + header)
+      const maxPreviewRows = 101; // 100 data rows + 1 header row
+      const previewData = jsonData.slice(0, Math.min(maxPreviewRows, jsonData.length));
       
       sheets.push({
         name: sheetName,
@@ -371,7 +372,12 @@ router.get('/:id/data', protect, async (req, res) => {
         page,
         limit,
         totalRows: excelData.rowCount,
-        totalPages
+        totalPages,
+        hasNextPage: endIndex < excelData.rowCount,
+        hasPrevPage: page > 1,
+        startIndex: startIndex + 1, // 1-based for display
+        endIndex: Math.min(endIndex, excelData.rowCount),
+        returnedRows: paginatedData.length
       },
       data: paginatedData
     });
@@ -464,15 +470,598 @@ router.get('/:id/analyze', protect, async (req, res) => {
       }
     });
     
+    // Handle data limiting based on query parameters
+    const limit = parseInt(req.query.limit, 10) || 100; // Default to 100 if not specified
+    const page = parseInt(req.query.page, 10) || 1;
+    const preview = req.query.preview === 'true';
+    
+    let responseData;
+    let pagination = null;
+    
+    // Always use proper pagination - respect the limit parameter
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    responseData = data.slice(startIndex, endIndex);
+    
+    pagination = {
+      page,
+      limit,
+      totalRows: data.length,
+      totalPages: Math.ceil(data.length / limit),
+      hasNextPage: endIndex < data.length,
+      hasPrevPage: page > 1,
+      isPreview: preview
+    };
+
     res.json({
       success: true,
       fileName: file.originalName,
       sheetName,
       analytics,
-      data: data.slice(0, 100) // Return only first 100 rows for API response
+      totalRows: data.length,
+      returnedRows: responseData.length,
+      pagination,
+      debug: {
+        requestParams: {
+          limit: req.query.limit,
+          page: req.query.page,
+          preview: req.query.preview
+        },
+        parsedParams: {
+          limit,
+          page,
+          preview
+        },
+        dataSlice: {
+          startIndex,
+          endIndex,
+          slicedLength: responseData.length
+        }
+      },
+      data: responseData
     });
   } catch (err) {
     console.error(err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/table-data
+// @desc    Get paginated table data (optimized for frontend tables)
+// @access  Private
+router.get('/:id/table-data', protect, async (req, res) => {
+  try {
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Read the file from disk
+    const filePath = path.join('uploads', file.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found on disk'
+      });
+    }
+    
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = req.query.sheet || workbook.SheetNames[0];
+    
+    if (!workbook.SheetNames.includes(sheetName)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Sheet not found in Excel file'
+      });
+    }
+    
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    // Parse pagination parameters
+    const limit = parseInt(req.query.limit, 10) || 10; // Default to 10 for tables
+    const page = parseInt(req.query.page, 10) || 1;
+    
+    // Calculate pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    const paginatedData = data.slice(startIndex, endIndex);
+    
+    res.json({
+      success: true,
+      fileName: file.originalName,
+      sheetName,
+      totalRows: data.length,
+      returnedRows: paginatedData.length,
+      columns: Object.keys(data[0] || {}),
+      pagination: {
+        page,
+        limit,
+        totalRows: data.length,
+        totalPages: Math.ceil(data.length / limit),
+        hasNextPage: endIndex < data.length,
+        hasPrevPage: page > 1,
+        startIndex: startIndex + 1, // 1-based for display
+        endIndex: Math.min(endIndex, data.length)
+      },
+      debug: {
+        requestParams: {
+          limit: req.query.limit,
+          page: req.query.page,
+          sheet: req.query.sheet
+        },
+        parsedParams: { limit, page, sheetName },
+        calculatedIndexes: { startIndex, endIndex }
+      },
+      data: paginatedData
+    });
+  } catch (err) {
+    console.error('Table data error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/chart-metadata
+// @desc    Get metadata for chart axis selection
+// @access  Private
+router.get('/:id/chart-metadata', protect, async (req, res) => {
+  try {
+    const ExcelData = require('../models/ExcelData');
+    
+    // Get the file
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Get sheet name from query params or use the first sheet
+    const sheetName = req.query.sheet || file.sheets[0].name;
+    
+    // Find the processed data
+    const excelData = await ExcelData.findOne({
+      file: file._id,
+      sheetName: sheetName
+    });
+    
+    if (!excelData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Processed data not found for this sheet. Please parse the file first.'
+      });
+    }
+    
+    // Format fields for chart axis selection
+    const availableFields = excelData.columns.map(column => {
+      const suitableFor = [];
+      
+      // Determine what this field is suitable for based on data type
+      if (column.dataType === 'number') {
+        suitableFor.push('x-axis', 'y-axis', 'value', 'size');
+      } else if (column.dataType === 'date') {
+        suitableFor.push('x-axis', 'category');
+      } else if (column.dataType === 'string') {
+        suitableFor.push('category', 'label', 'group');
+      }
+      
+      return {
+        name: column.name,
+        label: column.originalName,
+        dataType: column.dataType,
+        suitableFor: suitableFor,
+        statistics: column.statistics,
+        nullable: column.nullable || false
+      };
+    });
+    
+    // Recommend chart types based on available data types
+    const dataTypes = excelData.columns.map(col => col.dataType);
+    const hasNumeric = dataTypes.includes('number');
+    const hasDate = dataTypes.includes('date');
+    const hasCategorical = dataTypes.includes('string');
+    
+    const recommendedCharts = [];
+    if (hasNumeric && hasCategorical) {
+      recommendedCharts.push('bar', 'line', 'pie');
+    }
+    if (hasNumeric && hasDate) {
+      recommendedCharts.push('line', 'area');
+    }
+    if (hasNumeric) {
+      recommendedCharts.push('scatter', 'histogram');
+    }
+    if (hasCategorical) {
+      recommendedCharts.push('pie', 'doughnut');
+    }
+    
+    res.json({
+      success: true,
+      sheetName: excelData.sheetName,
+      availableFields: availableFields,
+      recommendedCharts: [...new Set(recommendedCharts)], // Remove duplicates
+      summary: excelData.summary
+    });
+  } catch (err) {
+    console.error('Chart metadata error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/chart-data
+// @desc    Get data formatted for chart consumption
+// @access  Private
+router.get('/:id/chart-data', protect, async (req, res) => {
+  try {
+    const ExcelData = require('../models/ExcelData');
+    
+    // Get the file
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Get parameters
+    const sheetName = req.query.sheet || file.sheets[0].name;
+    const chartType = req.query.chartType || 'bar';
+    const xAxis = req.query.xAxis;
+    const yAxis = req.query.yAxis;
+    const groupBy = req.query.groupBy;
+    const limit = parseInt(req.query.limit, 10) || 1000; // Default limit for chart data
+    
+    // Find the processed data
+    const excelData = await ExcelData.findOne({
+      file: file._id,
+      sheetName: sheetName
+    });
+    
+    if (!excelData) {
+      return res.status(404).json({
+        success: false,
+        error: 'Processed data not found for this sheet. Please parse the file first.'
+      });
+    }
+    
+    // Validate required fields
+    if (!xAxis) {
+      return res.status(400).json({
+        success: false,
+        error: 'xAxis parameter is required'
+      });
+    }
+    
+    // Get limited data for chart performance
+    const chartData = excelData.data.slice(0, limit);
+    
+    // Format data based on chart type
+    let formattedData;
+    
+    if (chartType === 'pie' || chartType === 'doughnut') {
+      // For pie charts, group by xAxis and sum yAxis values
+      const grouped = {};
+      chartData.forEach(row => {
+        const key = row[xAxis];
+        if (key !== null && key !== undefined) {
+          if (!grouped[key]) {
+            grouped[key] = 0;
+          }
+          if (yAxis && row[yAxis] !== null && row[yAxis] !== undefined) {
+            grouped[key] += Number(row[yAxis]) || 1;
+          } else {
+            grouped[key] += 1; // Count occurrences if no yAxis
+          }
+        }
+      });
+      
+      formattedData = {
+        labels: Object.keys(grouped),
+        datasets: [{
+          data: Object.values(grouped),
+          backgroundColor: [
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+            '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
+          ]
+        }]
+      };
+    } else if (chartType === 'scatter') {
+      // For scatter plots, need both x and y values
+      if (!yAxis) {
+        return res.status(400).json({
+          success: false,
+          error: 'yAxis parameter is required for scatter charts'
+        });
+      }
+      
+      const scatterData = chartData
+        .filter(row => row[xAxis] !== null && row[yAxis] !== null)
+        .map(row => ({
+          x: row[xAxis],
+          y: row[yAxis]
+        }));
+      
+      formattedData = {
+        datasets: [{
+          label: `${yAxis} vs ${xAxis}`,
+          data: scatterData,
+          backgroundColor: '#36A2EB'
+        }]
+      };
+    } else {
+      // For bar, line, area charts
+      if (groupBy) {
+        // Group data by groupBy field
+        const grouped = {};
+        chartData.forEach(row => {
+          const groupKey = row[groupBy];
+          const xValue = row[xAxis];
+          
+          if (!grouped[groupKey]) {
+            grouped[groupKey] = {};
+          }
+          
+          if (!grouped[groupKey][xValue]) {
+            grouped[groupKey][xValue] = 0;
+          }
+          
+          if (yAxis && row[yAxis] !== null) {
+            grouped[groupKey][xValue] += Number(row[yAxis]) || 0;
+          } else {
+            grouped[groupKey][xValue] += 1;
+          }
+        });
+        
+        // Get all unique x values
+        const allXValues = [...new Set(chartData.map(row => row[xAxis]))].sort();
+        
+        formattedData = {
+          labels: allXValues,
+          datasets: Object.keys(grouped).map((groupKey, index) => ({
+            label: groupKey,
+            data: allXValues.map(xVal => grouped[groupKey][xVal] || 0),
+            backgroundColor: `hsl(${index * 60}, 70%, 50%)`,
+            borderColor: `hsl(${index * 60}, 70%, 40%)`,
+            borderWidth: 1
+          }))
+        };
+      } else {
+        // Simple x-y chart
+        const labels = [];
+        const data = [];
+        
+        if (yAxis) {
+          // Aggregate by xAxis, sum yAxis
+          const aggregated = {};
+          chartData.forEach(row => {
+            const xValue = row[xAxis];
+            if (xValue !== null && xValue !== undefined) {
+              if (!aggregated[xValue]) {
+                aggregated[xValue] = 0;
+              }
+              aggregated[xValue] += Number(row[yAxis]) || 0;
+            }
+          });
+          
+          Object.keys(aggregated).sort().forEach(key => {
+            labels.push(key);
+            data.push(aggregated[key]);
+          });
+        } else {
+          // Count occurrences of xAxis values
+          const counts = {};
+          chartData.forEach(row => {
+            const xValue = row[xAxis];
+            if (xValue !== null && xValue !== undefined) {
+              counts[xValue] = (counts[xValue] || 0) + 1;
+            }
+          });
+          
+          Object.keys(counts).sort().forEach(key => {
+            labels.push(key);
+            data.push(counts[key]);
+          });
+        }
+        
+        formattedData = {
+          labels: labels,
+          datasets: [{
+            label: yAxis || 'Count',
+            data: data,
+            backgroundColor: '#36A2EB',
+            borderColor: '#36A2EB',
+            borderWidth: 1
+          }]
+        };
+      }
+    }
+    
+    res.json({
+      success: true,
+      chartType: chartType,
+      xAxis: xAxis,
+      yAxis: yAxis,
+      groupBy: groupBy,
+      dataPoints: chartData.length,
+      chartData: formattedData
+    });
+  } catch (err) {
+    console.error('Chart data error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/download-data
+// @desc    Download complete Excel data (all rows)
+// @access  Private
+router.get('/:id/download-data', protect, async (req, res) => {
+  try {
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Read the file from disk
+    const filePath = path.join('uploads', file.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found on disk'
+      });
+    }
+    
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = req.query.sheet || workbook.SheetNames[0];
+    
+    if (!workbook.SheetNames.includes(sheetName)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Sheet not found in Excel file'
+      });
+    }
+    
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+    
+    // Return ALL data without any limits
+    res.json({
+      success: true,
+      fileName: file.originalName,
+      sheetName,
+      totalRows: data.length,
+      columns: Object.keys(data[0] || {}),
+      data: data // Complete dataset
+    });
+  } catch (err) {
+    console.error('Download data error:', err.message);
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + err.message
+    });
+  }
+});
+
+// @route   GET api/excel/:id/preview
+// @desc    Get dynamic preview data with configurable limit
+// @access  Private
+router.get('/:id/preview', protect, async (req, res) => {
+  try {
+    const file = await ExcelFile.findById(req.params.id);
+    
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found'
+      });
+    }
+    
+    // Check if user owns the file
+    if (file.user.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access this file'
+      });
+    }
+    
+    // Read the file from disk
+    const filePath = path.join('uploads', file.filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found on disk'
+      });
+    }
+    
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = req.query.sheet || workbook.SheetNames[0];
+    
+    if (!workbook.SheetNames.includes(sheetName)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Sheet not found in Excel file'
+      });
+    }
+    
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    
+    // Get limit from query parameter (default to 10 data rows + header)
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const previewRows = limit + 1; // +1 for header row
+    
+    // Extract columns and preview data
+    const columns = jsonData[0] || [];
+    const previewData = jsonData.slice(0, Math.min(previewRows, jsonData.length));
+    
+    res.json({
+      success: true,
+      fileName: file.originalName,
+      sheetName,
+      columns,
+      rowCount: jsonData.length - 1, // Excluding header row
+      previewData,
+      requestedLimit: limit,
+      actualDataRows: previewData.length - 1, // Excluding header
+      totalRows: jsonData.length - 1
+    });
+  } catch (err) {
+    console.error('Preview data error:', err.message);
     res.status(500).json({
       success: false,
       error: 'Server error: ' + err.message
