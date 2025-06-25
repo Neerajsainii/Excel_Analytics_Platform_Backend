@@ -23,7 +23,7 @@ const DashboardSchema = new mongoose.Schema({
       },
       chartType: {
         type: String,
-        enum: ['bar', 'line', 'pie', 'scatter', 'table'],
+        enum: ['bar', 'line', 'pie', 'scatter', 'table', '3d-pie', 'doughnut', 'area', 'bubble', 'radar', 'polar', '3d-bar', '3d-line'],
         default: 'bar'
       },
       data: {
