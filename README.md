@@ -218,14 +218,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 <p align="center">
   Made with ❤️
-</p>
-
-## 🆕 Recent Updates
-
-- Major frontend and backend cleanup: removed unused files, markdown docs, and legacy code
-- Enhanced charting: 2D and 3D charts with download/save, zoom, and custom legends
-- Improved user and admin dashboards
-- Responsive UI with dark mode
-- Bug fixes and performance improvements
-
---- 
+</p> 
