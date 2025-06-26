@@ -44,7 +44,8 @@ app.use((err, req, res, next) => {
 // Connect to MongoDB
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
+    MONURI  = process.env.MONGO_URI || 'mongodb+srv://test_user:Flash_foryou123@cluster0.bxpqrod.mongodb.net/excel-analytics-platform';
+    await mongoose.connect(MONURI);
     console.log('MongoDB Connected');
   } catch (err) {
     console.error('MongoDB connection error:', err.message);
